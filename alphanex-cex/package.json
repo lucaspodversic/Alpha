@@ -1,0 +1,23 @@
+{
+  "name": "alphanex-cex",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AlphaNex CEX reference implementation (matching engine, double-entry ledger, API, custody, trading UI) / Implementación de referencia del CEX AlphaNex",
+  "license": "MIT",
+  "workspaces": [
+    "02-matching-engine",
+    "03-ledger",
+    "04-api",
+    "05-blockchain-custody",
+    "06-web-trading-ui"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build:web": "npm run build -w 06-web-trading-ui",
+    "dev:api": "npm run dev -w 04-api",
+    "dev:web": "npm run dev -w 06-web-trading-ui",
+    "contracts:test": "cd 05-blockchain-custody/contracts && forge test"
+  },
+  "engines": { "node": ">=20" }
+}

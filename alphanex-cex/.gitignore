@@ -1,0 +1,20 @@
+# EN: Dependencies & build output / ES: Dependencias y salida de build
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+# EN: Foundry output (forge-std in contracts/lib IS vendored) / ES: Salida de Foundry
+05-blockchain-custody/contracts/out/
+05-blockchain-custody/contracts/cache/
+05-blockchain-custody/contracts/broadcast/
+artifacts/
+# EN: Secrets — only .env.example is committed / ES: Secretos — solo se commitea .env.example
+.env
+.env.*
+!.env.example
+# EN: Local data & logs / ES: Datos locales y logs
+pgdata/
+*.log
+.DS_Store
+coverage/

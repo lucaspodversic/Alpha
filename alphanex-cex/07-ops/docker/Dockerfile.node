@@ -1,0 +1,32 @@
+# EN: One image for the Node back-end processes (api, watcher, signer). The monorepo root is the
+#     build context. TypeScript runs through tsx (no separate compile step in this reference build).
+#     Runs as the unprivileged "node" user; no secrets are baked in (everything comes from env).
+# ES: Una imagen para los procesos Node del back-end (api, watcher, firmante). El contexto de build
+#     es la raíz del monorepo. TypeScript corre con tsx (sin paso de compilación aparte en este build
+#     de referencia). Corre como el usuario sin privilegios "node"; no se hornean secretos (todo viene de env).
+FROM node:20-bookworm-slim AS deps
+WORKDIR /app
+# EN: Copy manifests first for layer caching. / ES: Copiar manifiestos primero para cachear capas.
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY 02-matching-engine/package.json 02-matching-engine/
+COPY 03-ledger/package.json 03-ledger/
+COPY 04-api/package.json 04-api/
+COPY 05-blockchain-custody/package.json 05-blockchain-custody/
+COPY 06-web-trading-ui/package.json 06-web-trading-ui/
+# EN: Install back-end workspaces only (skip the web app). / ES: Instalar solo workspaces del back-end (sin la web).
+RUN npm ci --workspace 04-api --workspace 05-blockchain-custody --include-workspace-root --no-audit --no-fund
+
+FROM node:20-bookworm-slim
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json tsconfig.base.json ./
+COPY 02-matching-engine 02-matching-engine
+COPY 03-ledger 03-ledger
+COPY 04-api 04-api
+COPY 05-blockchain-custody/package.json 05-blockchain-custody/tsconfig.json 05-blockchain-custody/
+COPY 05-blockchain-custody/src 05-blockchain-custody/src
+USER node
+# EN: Default command = API. Compose overrides it for watcher / signer.
+# ES: Comando por defecto = API. Compose lo reemplaza para watcher / firmante.
+CMD ["node", "--import", "tsx", "04-api/src/server.ts"]

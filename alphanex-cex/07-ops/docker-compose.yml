@@ -1,0 +1,122 @@
+# EN: Local / staging stack. LOCAL TESTNET ONLY (anvil chainId 31337).
+#     - Every published port is bound to 127.0.0.1 (never 0.0.0.0 on the host).
+#     - Inside the compose network services listen on 0.0.0.0 (ALLOW_PUBLIC_BIND=true) so they can
+#       reach each other; the signer publishes NO port at all.
+#     - Secrets come from 07-ops/.env (copy .env.example). Nothing secret is committed.
+#     Usage (from the repo root):
+#       cp 07-ops/.env.example 07-ops/.env   # then fill the values
+#       docker compose -f 07-ops/docker-compose.yml --env-file 07-ops/.env up --build
+# ES: Stack local / staging. SOLO TESTNET LOCAL (anvil chainId 31337).
+#     - Todo puerto publicado se ata a 127.0.0.1 (nunca 0.0.0.0 en el host).
+#     - Dentro de la red de compose los servicios escuchan en 0.0.0.0 (ALLOW_PUBLIC_BIND=true) para
+#       verse entre sí; el firmante NO publica ningún puerto.
+#     - Los secretos salen de 07-ops/.env (copiar .env.example). No se commitea nada secreto.
+name: alphanex-cex
+
+x-backend: &backend
+  build:
+    context: ..
+    dockerfile: 07-ops/docker/Dockerfile.node
+  image: alphanex/backend:local
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: alphanex
+      POSTGRES_USER: alphanex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in 07-ops/.env}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alphanex -d alphanex"]
+      interval: 5s
+      retries: 20
+
+  # EN: Local EVM chain. --block-time gives the watcher real confirmations to count.
+  # ES: Cadena EVM local. --block-time le da al watcher confirmaciones reales para contar.
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint: ["anvil", "--host", "0.0.0.0", "--chain-id", "31337", "--block-time", "2"]
+    ports: ["127.0.0.1:8545:8545"]
+
+  signer:
+    <<: *backend
+    command: ["node", "--import", "tsx", "05-blockchain-custody/src/signer-server.ts"]
+    environment:
+      SIGNER_HOST: 0.0.0.0
+      SIGNER_PORT: "4100"
+      SIGNER_HMAC_SECRET: ${SIGNER_HMAC_SECRET:?set SIGNER_HMAC_SECRET}
+      HOT_WALLET_PRIVATE_KEY: ${HOT_WALLET_PRIVATE_KEY:?set HOT_WALLET_PRIVATE_KEY (testnet only)}
+      SIGNER_ASSETS: ${SIGNER_ASSETS:?set SIGNER_ASSETS}
+      SIGNER_ALLOWED_CHAIN_IDS: "31337"
+      SIGNER_MIN_APPROVALS: "2"
+    # EN: No "ports:" on purpose — only reachable from the compose network. / ES: Sin "ports:" a propósito.
+
+  api:
+    <<: *backend
+    depends_on:
+      postgres: { condition: service_healthy }
+      anvil: { condition: service_started }
+      signer: { condition: service_started }
+    environment: &apienv
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      ALLOW_PUBLIC_BIND: "true"
+      PORT: "4000"
+      DATABASE_URL: postgres://alphanex:${POSTGRES_PASSWORD}@postgres:5432/alphanex
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://127.0.0.1:3000}
+      CHAIN_ID: "31337"
+      RPC_URL: http://anvil:8545
+      DEPOSIT_XPUB: ${DEPOSIT_XPUB:?set DEPOSIT_XPUB (xpub only, never xprv)}
+      HOT_WALLET_ADDRESS: ${HOT_WALLET_ADDRESS:?set HOT_WALLET_ADDRESS}
+      SIGNER_URL: http://signer:4100
+      SIGNER_HMAC_SECRET: ${SIGNER_HMAC_SECRET}
+      USDT_CONTRACT: ${USDT_CONTRACT:-}
+      ANX_CONTRACT: ${ANX_CONTRACT:-}
+      CONFIRMATIONS_ETH: ${CONFIRMATIONS_ETH:-3}
+      CONFIRMATIONS_USDT: ${CONFIRMATIONS_USDT:-3}
+      CONFIRMATIONS_ANX: ${CONFIRMATIONS_ANX:-3}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN2_EMAIL: ${ADMIN2_EMAIL:-}
+      ADMIN2_PASSWORD: ${ADMIN2_PASSWORD:-}
+    ports: ["127.0.0.1:4000:4000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      retries: 10
+
+  # EN: Deposit watcher + periodic reconciliation, sharing the API's Postgres.
+  # ES: Watcher de depósitos + conciliación periódica, compartiendo el Postgres de la API.
+  watcher:
+    <<: *backend
+    command: ["node", "--import", "tsx", "04-api/src/watcher-main.ts"]
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      <<: *apienv
+      WATCHER_POLL_MS: "4000"
+      RECONCILE_EVERY_MS: "300000"
+
+  web:
+    build:
+      context: ..
+      dockerfile: 07-ops/docker/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://127.0.0.1:4000}
+    image: alphanex/web:local
+    restart: unless-stopped
+    depends_on: [api]
+    ports: ["127.0.0.1:3000:3000"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+
+volumes:
+  pgdata:

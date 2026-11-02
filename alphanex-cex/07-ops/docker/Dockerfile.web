@@ -1,0 +1,27 @@
+# EN: Trading UI image (Next.js standalone output). NEXT_PUBLIC_API_URL is inlined at BUILD time,
+#     so pass it as a build arg (it is the URL the *browser* uses, e.g. http://127.0.0.1:4000).
+# ES: Imagen de la UI de trading (salida standalone de Next.js). NEXT_PUBLIC_API_URL se incrusta en
+#     tiempo de BUILD, así que se pasa como build arg (es la URL que usa el *navegador*).
+FROM node:20-bookworm-slim AS build
+WORKDIR /app
+ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:4000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL NEXT_TELEMETRY_DISABLED=1
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY 02-matching-engine/package.json 02-matching-engine/
+COPY 03-ledger/package.json 03-ledger/
+COPY 04-api/package.json 04-api/
+COPY 05-blockchain-custody/package.json 05-blockchain-custody/
+COPY 06-web-trading-ui/package.json 06-web-trading-ui/
+RUN npm ci --workspace 06-web-trading-ui --include-workspace-root --no-audit --no-fund
+COPY 06-web-trading-ui 06-web-trading-ui
+RUN npm run build -w 06-web-trading-ui
+
+FROM node:20-bookworm-slim
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+WORKDIR /app
+# EN: Standalone bundle keeps the workspace folder layout. / ES: El bundle standalone conserva la estructura del workspace.
+COPY --from=build /app/06-web-trading-ui/.next/standalone ./
+COPY --from=build /app/06-web-trading-ui/.next/static ./06-web-trading-ui/.next/static
+USER node
+EXPOSE 3000
+CMD ["node", "06-web-trading-ui/server.js"]

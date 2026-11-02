@@ -1,0 +1,16 @@
+# EN: Foundry config for AlphaNex custody/test contracts. forge-std is vendored (src only) in lib/.
+# ES: Configuración de Foundry para los contratos de custodia/prueba. forge-std viene incluido (solo src) en lib/.
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.24"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+remappings = ["forge-std/=lib/forge-std/src/"]
+
+[fuzz]
+runs = 256

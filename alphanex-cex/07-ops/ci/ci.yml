@@ -1,0 +1,68 @@
+# EN: GitHub Actions CI. The active copy lives at /.github/workflows/ci.yml (GitHub only reads that path);
+#     this file is kept identical in 07-ops/ci for review. Jobs: typecheck + unit tests for every
+#     workspace, Foundry contract tests, web production build, comment-density gate, compose lint.
+#     No secrets are needed: everything runs offline against PGlite / in-memory chains.
+# ES: CI de GitHub Actions. La copia activa está en /.github/workflows/ci.yml (GitHub solo lee esa ruta);
+#     este archivo se mantiene idéntico en 07-ops/ci para revisión. Jobs: typecheck + tests unitarios de
+#     cada workspace, tests de contratos con Foundry, build de producción de la web, control de densidad
+#     de comentarios y lint de compose. No hace falta ningún secreto: todo corre offline.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck / Chequeo de tipos
+        run: npm run typecheck
+      - name: Unit + integration tests (PGlite) / Tests unitarios + integración
+        run: npm test
+      - name: Web production build / Build de producción web
+        run: npm run build:web
+      - name: Comment density ≥ 25% / Densidad de comentarios ≥ 25%
+        run: node 07-ops/scripts/comment-density.mjs --min 25
+
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: 05-blockchain-custody/contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge fmt --check
+      - run: forge build --sizes
+      - run: forge test -vv
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file / Validar compose
+        run: |
+          cp 07-ops/.env.example 07-ops/.env
+          # EN: dummy values only for syntax validation / ES: valores ficticios solo para validar sintaxis
+          sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci/; s/^SIGNER_HMAC_SECRET=$/SIGNER_HMAC_SECRET=ci/; s/^HOT_WALLET_PRIVATE_KEY=$/HOT_WALLET_PRIVATE_KEY=ci/; s/^HOT_WALLET_ADDRESS=$/HOT_WALLET_ADDRESS=ci/; s/^DEPOSIT_XPUB=$/DEPOSIT_XPUB=ci/' 07-ops/.env
+          docker compose -f 07-ops/docker-compose.yml --env-file 07-ops/.env config -q
